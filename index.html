@@ -73,7 +73,7 @@ let centerLng=0;
 let centerMarker=null;
 let currentCircle=null;
 
-// ===== 距離UI（★ここ拡張済み）=====
+// ===== 距離UI（修正済み）=====
 function updateDistanceOptions(){
 const mode=document.getElementById("mode").value;
 const select=document.getElementById("distance");
@@ -90,13 +90,15 @@ select.add(o);
 });
 }else{
 unit.innerText="分";
-[10,20,30,40,50,60].forEach(v=>{
+for(let v=5; v<=60; v+=5){
 const o=new Option(v,v);
 if(v===30)o.selected=true;
 select.add(o);
-});
 }
 }
+}
+
+// 初期実行
 updateDistanceOptions();
 
 // ===== 色 =====
