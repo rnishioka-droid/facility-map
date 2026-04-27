@@ -49,6 +49,7 @@ html,body{height:100%;margin:0;}
 <label><span class="color-dot" style="background:violet"></span><input type="checkbox" value="GH" checked>GH</label>
 <label><span class="color-dot" style="background:grey"></span><input type="checkbox" value="デイ" checked>デイ</label>
 <label><span class="color-dot" style="background:black"></span><input type="checkbox" value="病院" checked>病院</label>
+<label><span class="color-dot" style="background:green"></span><input type="checkbox" value="訪問介護" checked>訪問介護</label>
 </div><br>
 
 <button onclick="search()">検索</button>
@@ -73,7 +74,6 @@ let centerLng=0;
 let centerMarker=null;
 let currentCircle=null;
 
-// ===== 距離UI（修正済み）=====
 function updateDistanceOptions(){
 const mode=document.getElementById("mode").value;
 const select=document.getElementById("distance");
@@ -97,11 +97,8 @@ select.add(o);
 }
 }
 }
-
-// 初期実行
 updateDistanceOptions();
 
-// ===== 色 =====
 function getColor(c){
 if(!c)return"blue";
 c=c.replace(/\s/g,"");
@@ -112,19 +109,19 @@ if(c.includes("サ高住"))return"orange";
 if(c.includes("GH"))return"violet";
 if(c.includes("デイ"))return"grey";
 if(c.includes("病院"))return"black";
+if(c.includes("訪問介護"))return"green"; // 色分離
 return"blue";
 }
 
 function createIcon(color){
 return L.icon({
-iconUrl:"https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-"+color+".png",
+iconUrl:"https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-"+color+".png",
 shadowUrl:"https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png",
 iconSize:[25,41],
 iconAnchor:[12,41]
 });
 }
 
-// ===== 距離 =====
 function getDistance(a,b,c,d){
 const R=6371;
 const dLat=(c-a)*Math.PI/180;
@@ -135,7 +132,6 @@ Math.sin(dLng/2)**2;
 return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
 }
 
-// ===== CSV =====
 Papa.parse("data.csv",{
 download:true,
 header:true,
@@ -172,7 +168,6 @@ allMarkers.push(m);
 }
 });
 
-// ===== 検索 =====
 async function search(){
 
 const addr=document.getElementById("address").value.trim();
@@ -190,8 +185,11 @@ centerLng=parseFloat(data[0].lon);
 
 map.setView([centerLat,centerLng],13);
 
+// ★起点ピン修正
 if(centerMarker)map.removeLayer(centerMarker);
-centerMarker=L.marker([centerLat,centerLng]).addTo(map);
+centerMarker=L.marker([centerLat,centerLng],{
+icon:createIcon("red")
+}).addTo(map).bindPopup("検索地点").openPopup();
 
 if(currentCircle){map.removeLayer(currentCircle);currentCircle=null;}
 
@@ -227,7 +225,6 @@ count++;
 document.getElementById("count").innerText="件数:"+count;
 }
 
-// ===== CSV =====
 function exportFaxCSV(){
 let csv="name,category,company,fax,distance_km\n";
 currentResults.forEach(m=>{
