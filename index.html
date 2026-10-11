@@ -1,0 +1,1119 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>施設マップ</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster/dist/MarkerCluster.Default.css">
+<script src="https://unpkg.com/leaflet.markercluster/dist/leaflet.markercluster.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+<style>
+html,body{height:100%;margin:0;}
+#map{position:absolute;top:0;bottom:0;width:100%;}
+
+#filter{
+  position:absolute;top:12px;left:12px;z-index:1000;
+  width:272px;padding:14px;
+  background:rgba(255,255,255,0.96);
+  border-radius:10px;
+  box-shadow:0 2px 12px rgba(0,0,0,0.2);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  font-size:13px;
+  box-sizing:border-box;
+}
+
+#address{width:100%;height:32px;padding:5px 8px;box-sizing:border-box;}
+.search-options{display:flex;align-items:center;gap:7px;margin:10px 0;}
+.search-options select{height:30px;}
+#mode{width:88px;}
+#distance{width:62px;}
+.station-walk-row{display:block;margin:10px 0;}
+.station-walk-row select{width:100%;height:30px;margin-top:5px;}
+.circle-row{display:flex;align-items:center;margin-bottom:10px;}
+
+.grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:8px 10px;
+  padding:10px 0;
+  border-top:1px solid #ddd;
+  border-bottom:1px solid #ddd;
+}
+
+.grid label{display:flex;align-items:center;white-space:nowrap;line-height:1.2;}
+.grid input{margin:0 4px 0 0;}
+
+.color-dot{
+  display:inline-block;
+  flex:none;
+  width:10px;
+  height:10px;
+  border-radius:50%;
+  margin-right:5px;
+}
+
+.custom-pin{
+  position:relative;
+  width:24px;
+  height:24px;
+  border:2px solid #fff;
+  border-radius:50% 50% 50% 0;
+  box-shadow:0 1px 4px rgba(0,0,0,0.55);
+  transform:rotate(-45deg);
+}
+
+.custom-pin::after{
+  content:"";
+  position:absolute;
+  width:8px;
+  height:8px;
+  top:6px;
+  left:6px;
+  background:#fff;
+  border-radius:50%;
+}
+
+.buttons{display:flex;gap:5px;margin-top:10px;}
+.buttons button{height:30px;padding:0 8px;cursor:pointer;}
+.buttons button:disabled{cursor:wait;opacity:0.65;}
+#count{margin-top:8px;font-weight:bold;}
+#status{margin-top:4px;color:#555;line-height:1.35;}
+</style>
+</head>
+
+<body>
+
+<div id="map"></div>
+
+<div id="filter">
+
+<input id="address" placeholder="住所 or 駅">
+
+<div class="search-options">
+  <select id="mode" onchange="updateDistanceOptions()">
+    <option value="distance">距離</option>
+    <option value="drive">車</option>
+    <option value="train">電車</option>
+  </select>
+
+  <select id="distance"></select>
+  <span id="unit">km</span>
+</div>
+
+<label class="station-walk-row" for="stationWalk">
+  最寄り駅からの徒歩時間
+  <select id="stationWalk">
+    <option value="">指定なし</option>
+    <option value="10">徒歩10分以内</option>
+    <option value="20">徒歩20分以内</option>
+    <option value="30">徒歩30分以内</option>
+  </select>
+</label>
+
+<label class="circle-row">
+  <input type="checkbox" id="circleToggle" checked> 円表示
+</label>
+
+<div class="grid">
+  <label><span class="color-dot" style="background:red"></span><input type="checkbox" value="特養" checked>特養</label>
+  <label><span class="color-dot" style="background:blue"></span><input type="checkbox" value="老健" checked>老健</label>
+
+  <label><span class="color-dot" style="background:green"></span><input type="checkbox" value="有料" checked>有料</label>
+  <label><span class="color-dot" style="background:orange"></span><input type="checkbox" value="サ高住" checked>サ高住</label>
+
+  <label><span class="color-dot" style="background:violet"></span><input type="checkbox" value="GH" checked>GH</label>
+  <label><span class="color-dot" style="background:grey"></span><input type="checkbox" value="デイ" checked>デイ</label>
+
+  <label><span class="color-dot" style="background:black"></span><input type="checkbox" value="病院" checked>病院</label>
+  <label><span class="color-dot" style="background:green"></span><input type="checkbox" value="訪問介護" checked>訪問介護</label>
+
+  <label><span class="color-dot" style="background:#c99700"></span><input type="checkbox" value="保育所（認可）" checked>保育所（認可）</label>
+  <div></div>
+
+  <label><span class="color-dot" style="background:#38a9db"></span><input type="checkbox" value="認証保育所A" checked>認証保育所A</label>
+  <label><span class="color-dot" style="background:#e83e8c"></span><input type="checkbox" value="認証保育所B" checked>認証保育所B</label>
+</div>
+
+<div class="buttons">
+  <button onclick="search()">検索</button>
+  <button onclick="exportFaxCSV()" disabled>FAX用CSV</button>
+  <button onclick="exportDetailCSV()" disabled>確認用CSV</button>
+</div>
+
+<div id="count">件数:0</div>
+<div id="status" role="status" aria-live="polite"></div>
+
+</div>
+
+<script>
+const map = L.map("map").setView([35.735,139.715],13);
+
+L.tileLayer(
+  "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+  {attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> | ' +
+    '<a href="https://routing.openstreetmap.de/about.html">徒歩: FOSSGIS / OSRM</a> | ' +
+    '<a href="https://www.openstreetmap.org/fixthemap">地図を修正</a> | ' +
+    '<a href="https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-N02-2025.html">駅: 国土数値情報を加工</a>'}
+).addTo(map);
+
+const markers = L.markerClusterGroup().addTo(map);
+const allMarkers = [];
+
+let currentResults = [];
+let centerLat = 0;
+let centerLng = 0;
+let centerMarker = null;
+let currentCircle = null;
+let latestSearchId = 0;
+let isSearching = false;
+let resultsAreComplete = false;
+
+const walkDurationCache = new Map();
+const nearestStationCache = new Map();
+const stationAreaCache = new Map();
+const geocodeCache = new Map();
+const apiConfig = window.FACILITY_MAP_API || {};
+const STATION_ENDPOINT = apiConfig.stationEndpoint ||
+  "https://overpass-api.de/api/interpreter";
+const STATION_DATA_URL = apiConfig.stationDataUrl !== undefined
+  ? apiConfig.stationDataUrl
+  : (apiConfig.stationEndpoint ? null : "stations.json");
+const WALK_TABLE_ENDPOINT =
+  apiConfig.walkTableEndpoint ||
+  "https://routing.openstreetmap.de/routed-foot/table/v1/foot/";
+const WALK_TABLE_CHUNK_SIZE = 80;
+const WALK_TABLE_MAX_SOURCES = 8;
+const WALK_REQUEST_INTERVAL_MS = 1100;
+const STATION_TIMEOUT_MS = 20000;
+const WALK_TIMEOUT_MS = 15000;
+const API_MAX_ATTEMPTS = 2;
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const CACHE_MAX_ENTRIES = 50000;
+let lastWalkRequestAt = 0;
+let stationRetryAfter = 0;
+let walkRetryAfter = 0;
+let facilityDataReady = false;
+let bundledStations = null;
+let lastSearchDiagnostics = null;
+const persistentCacheNames = new Map([
+  [stationAreaCache,"areas"],
+  [nearestStationCache,"stations"],
+  [walkDurationCache,"durations"],
+  [geocodeCache,"locations"]
+]);
+const pendingCacheWrites = new Map();
+let cacheDatabase = null;
+let cacheFlushPromise = null;
+let cacheFlushTimer = null;
+const cacheReady = restorePersistentCache();
+
+function updateDistanceOptions(){
+  const mode = document.getElementById("mode").value;
+  const select = document.getElementById("distance");
+  const unit = document.getElementById("unit");
+
+  select.innerHTML = "";
+
+  if(mode === "distance"){
+    unit.innerText = "km";
+
+    [1,3,5,10,15,20,25,30].forEach(value => {
+      const option = new Option(value,value);
+
+      if(value === 5){
+        option.selected = true;
+      }
+
+      select.add(option);
+    });
+  }else{
+    unit.innerText = "分";
+
+    for(let value = 5; value <= 60; value += 5){
+      const option = new Option(value,value);
+
+      if(value === 30){
+        option.selected = true;
+      }
+
+      select.add(option);
+    }
+  }
+}
+
+updateDistanceOptions();
+
+function getColor(category){
+  if(!category){
+    return "blue";
+  }
+
+  category = category.replace(/\s/g,"");
+
+  if(category === "認証保育所A") return "#38a9db";
+  if(category === "認証保育所B") return "#e83e8c";
+  if(category.includes("保育所（認可）")) return "gold";
+  if(category.includes("特養")) return "red";
+  if(category.includes("老健")) return "blue";
+  if(category.includes("有料")) return "green";
+  if(category.includes("サ高住")) return "orange";
+  if(category.includes("GH")) return "violet";
+  if(category.includes("デイ")) return "grey";
+  if(category.includes("病院")) return "black";
+  if(category.includes("訪問介護")) return "green";
+
+  return "blue";
+}
+
+function createIcon(color){
+  return L.divIcon({
+    className:"",
+    html:`<div class="custom-pin" style="background:${color}"></div>`,
+    iconSize:[28,28],
+    iconAnchor:[14,28],
+    popupAnchor:[0,-30]
+  });
+}
+
+function getPopupHtml(marker,stationWalk = null){
+  const row = marker.data;
+  const url = row.url
+    ? `<a href="${row.url}" target="_blank">サイト</a>`
+    : "";
+  const walkText = stationWalk && Number.isFinite(stationWalk.minutes)
+    ? `最寄り駅:${escapeHTML(stationWalk.station.name)}<br>` +
+      `駅徒歩:約${Math.max(1,Math.round(stationWalk.minutes))}分<br>`
+    : "";
+
+  return `<b>${row.name}</b><br>
+    区分:${marker.category}<br>
+    会社:${row.company}<br>
+    住所:${row.address}<br>
+    ${walkText}
+    TEL:${row.phone}<br>
+    FAX:${row.fax}<br>
+    ${url}`;
+}
+
+function escapeHTML(value){
+  const element = document.createElement("span");
+  element.textContent = value;
+  return element.innerHTML;
+}
+
+function updateMarkerPopup(marker,stationWalk = null){
+  marker.bindPopup(getPopupHtml(marker,stationWalk));
+}
+
+function getFacilityMarker(facility){
+  if(!facility.mapMarker){
+    const marker = L.marker([facility.lat,facility.lng],{
+      icon:createIcon(getColor(facility.category))
+    });
+    marker.lat = facility.lat;
+    marker.lng = facility.lng;
+    marker.category = facility.category;
+    marker.data = facility.data;
+    facility.mapMarker = marker;
+  }
+  return facility.mapMarker;
+}
+
+function setLoading(active,message = ""){
+  isSearching = active;
+
+  document
+    .querySelectorAll(".buttons button")
+    .forEach(button => {
+      button.disabled = active;
+    });
+
+  document.getElementById("status").innerText = message;
+}
+
+function delay(ms){
+  return new Promise(resolve => setTimeout(resolve,ms));
+}
+
+function getCoordKey(lat,lng){
+  return `${lat},${lng}`;
+}
+
+function readCache(cache,key){
+  const entry = cache.get(key);
+  if(entry && Date.now() - entry.time < CACHE_TTL_MS){
+    return entry.value;
+  }
+  cache.delete(key);
+  if(entry) queueCacheWrite(cache,key,null);
+  return undefined;
+}
+
+function writeCache(cache,key,value){
+  if(!cache.has(key) && cache.size >= CACHE_MAX_ENTRIES){
+    const oldestKey = cache.keys().next().value;
+    cache.delete(oldestKey);
+    queueCacheWrite(cache,oldestKey,null);
+  }
+  const entry = {value,time:Date.now()};
+  cache.set(key,entry);
+  queueCacheWrite(cache,key,entry);
+}
+
+function restorePersistentCache(){
+  return new Promise(resolve => {
+    let finished = false;
+    const finish = () => {
+      if(finished) return;
+      finished = true;
+      clearTimeout(timeout);
+      resolve();
+    };
+    // Optional storage must never block searching in private/disabled-storage modes.
+    const timeout = setTimeout(finish,1500);
+    try{
+      const request = indexedDB.open(`facility-map-walk-v3:${STATION_DATA_URL || "overpass"}:${STATION_ENDPOINT}:${WALK_TABLE_ENDPOINT}`,1);
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore("entries",{keyPath:"id"});
+      };
+      request.onerror = finish;
+      request.onblocked = finish;
+      request.onsuccess = () => {
+        const database = request.result;
+        if(finished){ database.close(); return; }
+        database.onversionchange = () => {
+          database.close();
+          cacheDatabase = null;
+        };
+        try{
+          const transaction = database.transaction("entries","readonly");
+          const read = transaction.objectStore("entries").getAll();
+          read.onsuccess = () => {
+            if(finished){ database.close(); return; }
+            cacheDatabase = database;
+            const cachesByName = new Map([...persistentCacheNames].map(([cache,name]) => [name,cache]));
+            for(const record of read.result){
+              const cache = cachesByName.get(record.name);
+              if(!cache || !Number.isFinite(record.time) || Date.now() - record.time >= CACHE_TTL_MS){
+                pendingCacheWrites.set(record.id,null);
+                continue;
+              }
+              if(cache.size >= CACHE_MAX_ENTRIES){
+                const oldestKey = cache.keys().next().value;
+                cache.delete(oldestKey);
+                pendingCacheWrites.set(`${record.name}:${oldestKey}`,null);
+              }
+              cache.set(record.key,{value:record.value,time:record.time});
+            }
+            finish();
+            flushPersistentCache();
+          };
+          read.onerror = () => { database.close(); finish(); };
+        }catch(error){ database.close(); finish(); }
+      };
+    }catch(error){ finish(); }
+  });
+}
+
+function queueCacheWrite(cache,key,entry){
+  if(!cacheDatabase) return;
+  const name = persistentCacheNames.get(cache);
+  const id = `${name}:${key}`;
+  pendingCacheWrites.set(id,entry ? {id,name,key,...entry} : null);
+  if(cacheFlushTimer === null){
+    cacheFlushTimer = setTimeout(() => {
+      cacheFlushTimer = null;
+      flushPersistentCache();
+    },250);
+  }
+}
+
+function flushPersistentCache(){
+  if(cacheFlushPromise) return cacheFlushPromise.then(flushPersistentCache);
+  if(!cacheDatabase || !pendingCacheWrites.size) return Promise.resolve();
+  const changes = [...pendingCacheWrites];
+  pendingCacheWrites.clear();
+  cacheFlushPromise = new Promise(resolve => {
+    try{
+      const transaction = cacheDatabase.transaction("entries","readwrite");
+      transaction.oncomplete = resolve;
+      transaction.onerror = resolve;
+      transaction.onabort = resolve;
+      const store = transaction.objectStore("entries");
+      for(const [id,entry] of changes){
+        if(entry) store.put(entry);
+        else store.delete(id);
+      }
+    }catch(error){ resolve(); }
+  }).then(() => { cacheFlushPromise = null; });
+  return cacheFlushPromise;
+}
+
+async function fetchJSON(url,options = {},timeoutMs = 20000,stage = "検索地点"){
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(),timeoutMs);
+  const trace = {stage,url,startedAt:Date.now(),status:null};
+  if(lastSearchDiagnostics) lastSearchDiagnostics.requests.push(trace);
+  try{
+    const response = await fetch(url,{...options,signal:controller.signal});
+    trace.status = response.status;
+    if(!response.ok){
+      const error = new Error(`APIの取得に失敗しました (HTTP ${response.status})`);
+      error.status = response.status;
+      const body = await response.json().catch(() => null);
+      error.code = body && body.code;
+      error.apiMessage = body && body.message;
+      const retryAfter = response.headers.get("Retry-After");
+      error.retryAfterMs = /^\d+$/.test(retryAfter || "")
+        ? Number(retryAfter) * 1000
+        : Math.max(0,Date.parse(retryAfter) - Date.now()) || 0;
+      throw error;
+    }
+    return await response.json();
+  }catch(error){
+    if(error.name === "AbortError"){
+      error = new Error(`${stage}の取得がタイムアウトしました`);
+      error.retryable = true;
+    }
+    error.stage = stage;
+    error.retryable = error.retryable || error instanceof TypeError ||
+      [429,502,503,504].includes(error.status);
+    trace.error = error.message;
+    throw error;
+  }finally{
+    trace.elapsedMs = Date.now() - trace.startedAt;
+    if(stage === "徒歩ルート") lastWalkRequestAt = Date.now();
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchWithRetry(stage,url,options,timeoutMs,beforeAttempt = async () => {}){
+  for(let attempt = 1; attempt <= API_MAX_ATTEMPTS; attempt++){
+    await beforeAttempt();
+    try{
+      return await fetchJSON(url,options,timeoutMs,stage);
+    }catch(error){
+      if(!error.retryable || attempt === API_MAX_ATTEMPTS) throw error;
+      const waitMs = Math.max(error.status === 429 ? 30000 : 5000,error.retryAfterMs || 0);
+      if(waitMs > 60000) throw error;
+      document.getElementById("status").innerText =
+        `${stage}を再取得中（${attempt + 1}/${API_MAX_ATTEMPTS}）...`;
+      await delay(waitMs);
+    }
+  }
+}
+
+async function loadBundledStations(){
+  if(bundledStations) return bundledStations;
+  const data = await fetchWithRetry("同梱駅データ",STATION_DATA_URL,{},STATION_TIMEOUT_MS);
+  if(data.schemaVersion !== 1 || data.datasetVersion !== "mlit-n02-2025" ||
+    !Array.isArray(data.stations) || !data.stations.length ||
+    data.stations.some(station => !station.id || !station.name ||
+      !Number.isFinite(station.lat) || !Number.isFinite(station.lng))){
+    throw new Error("同梱駅データが不正です");
+  }
+  bundledStations = data.stations;
+  return bundledStations;
+}
+
+async function fetchStations(lat,lng,radiusKm){
+  const key = `${getCoordKey(lat,lng)}:${radiusKm}`;
+  const cached = readCache(stationAreaCache,key);
+  if(cached !== undefined) return cached;
+  if(STATION_DATA_URL){
+    try{
+      const stations = (await loadBundledStations()).filter(station =>
+        getDistance(lat,lng,station.lat,station.lng) <= radiusKm);
+      writeCache(stationAreaCache,key,stations);
+      return stations;
+    }catch(error){
+      // Missing deployments can still use actual OSM station data, never guessed data.
+      if(lastSearchDiagnostics) lastSearchDiagnostics.stationDataFallback = error.message;
+    }
+  }
+  if(Date.now() < stationRetryAfter){
+    throw new Error("駅データAPIの利用制限中です。しばらく待って再検索してください");
+  }
+  const latMargin = radiusKm / 6371 * 180 / Math.PI;
+  const lngMargin = Math.abs(lat) + latMargin >= 90 ? 180 :
+    Math.asin(Math.min(1,Math.sin(radiusKm / 6371) / Math.cos(lat * Math.PI / 180))) * 180 / Math.PI;
+  const bounds = [lat-latMargin,lng-lngMargin,lat+latMargin,lng+lngMargin].join(",");
+  const query = `[out:json][timeout:12];` +
+    `nwr(${bounds})` +
+    `[railway~"^(station|halt)$"][disused!=yes][abandoned!=yes];out center tags;`;
+  let data;
+  try{
+    data = await fetchWithRetry("駅データ",STATION_ENDPOINT,{
+      method:"POST",
+      body:new URLSearchParams({data:query})
+    },STATION_TIMEOUT_MS);
+  }catch(error){
+    if(error.status === 429 || error.status === 406){
+      stationRetryAfter = Date.now() + 30000;
+    }
+    throw error;
+  }
+  if(!Array.isArray(data.elements) || data.remark){
+    throw new Error("鉄道駅データを完全に取得できませんでした");
+  }
+  const stations = data.elements.flatMap(element => {
+    const tags = element.tags || {};
+    if(!["station","halt"].includes(tags.railway) ||
+      tags.disused === "yes" || tags.abandoned === "yes") return [];
+    const point = element.center || element;
+    if(!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return [];
+    return [{
+      id:`${element.type}/${element.id}`,
+      name:tags["name:ja"] || tags.name || "名称不明の鉄道駅",
+      lat:point.lat,
+      lng:point.lon
+    }];
+  });
+  writeCache(stationAreaCache,key,stations);
+  return stations;
+}
+
+async function findNearestStations(candidates,searchId,issues = [],origin = {lat:centerLat,lng:centerLng}){
+  const stationsByFacility = new Map();
+  let pending = candidates.filter(marker => {
+    const station = readCache(nearestStationCache,getCoordKey(marker.lat,marker.lng));
+    if(station === undefined) return true;
+    stationsByFacility.set(marker,station);
+    return false;
+  });
+  if(!pending.length) return stationsByFacility;
+  const lat = origin.lat;
+  const lng = origin.lng;
+  const candidateRadius = pending.reduce((maximum,marker) =>
+    Math.max(maximum,getDistance(lat,lng,marker.lat,marker.lng)),0);
+  // Expand beyond the range so a facility near its boundary can use an outside station.
+  for(const margin of [5,10,20,40,80]){
+    document.getElementById("status").innerText =
+      `最寄り駅を確認中:残り${pending.length}件`;
+    const radius = candidateRadius + margin;
+    let stations;
+    try{
+      stations = await fetchStations(lat,lng,radius);
+    }catch(error){
+      issues.push({stage:"駅データ",message:error.message,status:error.status});
+      break;
+    }
+    if(searchId !== latestSearchId) return null;
+    pending = pending.filter(marker => {
+      const cached = readCache(nearestStationCache,getCoordKey(marker.lat,marker.lng));
+      if(cached !== undefined){
+        stationsByFacility.set(marker,cached);
+        return false;
+      }
+      let nearest = null;
+      let nearestDistance = Infinity;
+      for(const station of stations){
+        const distance = getDistance(marker.lat,marker.lng,station.lat,station.lng);
+        if(distance < nearestDistance){
+          nearest = station;
+          nearestDistance = distance;
+        }
+      }
+      // Triangle inequality guarantees no unqueried station can be closer.
+      const insideDistance = radius - getDistance(lat,lng,marker.lat,marker.lng);
+      if(nearest && nearestDistance < insideDistance){
+        stationsByFacility.set(marker,nearest);
+        writeCache(nearestStationCache,getCoordKey(marker.lat,marker.lng),nearest);
+        return false;
+      }
+      return true;
+    });
+    if(!pending.length) break;
+    await delay(WALK_REQUEST_INTERVAL_MS);
+  }
+  // Unconfirmed nearest stations are unavailable, never guessed from an incomplete area.
+  for(const marker of pending){
+    stationsByFacility.set(marker,null);
+  }
+  return stationsByFacility;
+}
+
+function getWalkCacheKey(marker,station){
+  return `${station.id}:${getCoordKey(station.lat,station.lng)}->` +
+    getCoordKey(marker.lat,marker.lng);
+}
+
+function makeWalkingBatches(pairs){
+  const sorted = [...pairs].sort((a,b) => a.station.id.localeCompare(b.station.id));
+  const batches = [];
+  let chunk = [];
+  let sources = new Set();
+  for(const pair of sorted){
+    if(chunk.length >= WALK_TABLE_CHUNK_SIZE ||
+      (!sources.has(pair.station.id) && sources.size >= WALK_TABLE_MAX_SOURCES)){
+      batches.push(chunk);
+      chunk = [];
+      sources = new Set();
+    }
+    chunk.push(pair);
+    sources.add(pair.station.id);
+  }
+  if(chunk.length) batches.push(chunk);
+  return batches;
+}
+
+async function fetchWalkingDurations(pairs,budget = {remaining:8,issues:[]},depth = 0){
+  if(!pairs.length) return [];
+  if(budget.remaining-- <= 0) return pairs.map(() => null);
+  if(Date.now() < walkRetryAfter){
+    throw new Error("徒歩APIの利用制限中です。しばらく待って再検索してください");
+  }
+  const stations = [...new Map(pairs.map(pair => [pair.station.id,pair.station])).values()];
+  const points = [...stations,...pairs.map(pair => pair.marker)];
+  const coordinates = points.map(point => `${point.lng},${point.lat}`).join(";");
+  const sources = stations.map((station,index) => index).join(";");
+  const destinations = pairs.map((pair,index) => stations.length + index).join(";");
+  let data;
+  try{
+    data = await fetchWithRetry("徒歩ルート",WALK_TABLE_ENDPOINT + coordinates +
+      `?sources=${sources}&destinations=${destinations}&annotations=duration` +
+      `&radiuses=${points.map(() => 200).join(";")}`,{},WALK_TIMEOUT_MS,async () => {
+        await delay(Math.max(0,WALK_REQUEST_INTERVAL_MS - (Date.now() - lastWalkRequestAt)));
+        lastWalkRequestAt = Date.now();
+      });
+  }catch(error){
+    if(error.code === "NoSegment"){
+      data = {code:"NoSegment",message:error.apiMessage};
+    }else{
+      if(error.status === 429){
+        walkRetryAfter = Date.now() + 30000;
+      }
+      if(depth > 0){
+        budget.issues.push({stage:"徒歩ルート",message:error.message,status:error.status});
+        return pairs.map(() => null);
+      }
+      throw error;
+    }
+  }
+  // A single off-network coordinate must not discard all the other facilities.
+  if(data.code === "NoSegment"){
+    if(pairs.length === 1) return [null];
+    const match = /^Could not find a matching segment for coordinate (\d+)$/.exec(data.message || "");
+    const invalidIndex = match ? Number(match[1]) : -1;
+    if(invalidIndex >= 0 && invalidIndex < points.length){
+      const rejected = invalidIndex < stations.length
+        ? pair => pair.station.id === stations[invalidIndex].id
+        : pair => pair === pairs[invalidIndex - stations.length];
+      const validPairs = pairs.filter(pair => !rejected(pair));
+      const durations = await fetchWalkingDurations(validPairs,budget,depth+1);
+      let index = 0;
+      return pairs.map(pair => rejected(pair) ? null : durations[index++]);
+    }
+    if(depth >= 2) return pairs.map(() => null);
+    const middle = Math.ceil(pairs.length / 2);
+    const left = await fetchWalkingDurations(pairs.slice(0,middle),budget,depth+1);
+    const right = await fetchWalkingDurations(pairs.slice(middle),budget,depth+1);
+    return [...left,...right];
+  }
+  if(data.code !== "Ok" || !Array.isArray(data.durations) ||
+    data.durations.length !== stations.length ||
+    data.durations.some(row => !Array.isArray(row) || row.length !== pairs.length)){
+    throw new Error("徒歩ルートAPIで所要時間を取得できません");
+  }
+  return pairs.map((pair,index) => {
+    const row = stations.findIndex(station => station.id === pair.station.id);
+    const seconds = data.durations[row][index];
+    if(seconds !== null && (!Number.isFinite(seconds) || seconds < 0)){
+      throw new Error("徒歩ルートAPIの所要時間が不正です");
+    }
+    return seconds === null ? null : seconds / 60;
+  });
+}
+
+async function filterByWalkingTime(candidates,limitMinutes,searchId,origin){
+  const issues = [];
+  const stations = await findNearestStations(candidates,searchId,issues,origin);
+  if(stations === null) return null;
+  const uncachedByKey = new Map();
+  const details = new Map();
+  for(const marker of candidates){
+    const station = stations.get(marker);
+    if(!station) continue;
+    const key = getWalkCacheKey(marker,station);
+    const minutes = readCache(walkDurationCache,key);
+    if(minutes === undefined){
+      uncachedByKey.set(key,{marker,station});
+    }else{
+      details.set(key,{station,minutes});
+    }
+  }
+  const uncached = [...uncachedByKey.values()];
+  const batches = makeWalkingBatches(uncached);
+  let processed = 0;
+  let consecutiveFailures = 0;
+  for(const chunk of batches){
+    if(searchId !== latestSearchId) return null;
+    document.getElementById("status").innerText =
+      `駅徒歩を確認中 ${processed}/${uncached.length}`;
+    let durations;
+    const budget = {remaining:8,issues:[]};
+    try{
+      durations = await fetchWalkingDurations(chunk,budget);
+      issues.push(...budget.issues);
+      consecutiveFailures = 0;
+    }catch(error){
+      issues.push({stage:"徒歩ルート",message:error.message,status:error.status});
+      processed += chunk.length;
+      if(++consecutiveFailures >= 3 || [429,406].includes(error.status)) break;
+      continue;
+    }
+    processed += chunk.length;
+    if(searchId !== latestSearchId) return null;
+    chunk.forEach(({marker,station},chunkIndex) => {
+      const minutes = durations[chunkIndex];
+      details.set(getWalkCacheKey(marker,station),{station,minutes});
+      if(Number.isFinite(minutes)){
+        writeCache(walkDurationCache,getWalkCacheKey(marker,station),minutes);
+      }
+    });
+  }
+  const detailFor = marker => {
+    const station = stations.get(marker);
+    return station && details.get(getWalkCacheKey(marker,station));
+  };
+  const results = candidates.filter(marker => {
+    const detail = detailFor(marker);
+    return detail && Number.isFinite(detail.minutes) && detail.minutes <= limitMinutes;
+  });
+  results.forEach(marker => { marker.stationWalk = detailFor(marker); });
+  const unavailableCount = candidates.filter(marker => {
+    const detail = detailFor(marker);
+    return !detail || !Number.isFinite(detail.minutes);
+  }).length;
+  return {results,unavailableCount,assessedCount:candidates.length-unavailableCount,issues};
+}
+
+function isCategoryMatch(markerCategory,checkedCategory){
+  const marker = String(markerCategory || "").replace(/\s/g,"");
+  const checked = String(checkedCategory || "").replace(/\s/g,"");
+
+  if(checked === "認証保育所A" || checked === "認証保育所B"){
+    return marker === checked;
+  }
+
+  return marker.includes(checked);
+}
+
+function getDistance(lat1,lng1,lat2,lng2){
+  const radius = 6371;
+  const latDifference = (lat2-lat1) * Math.PI / 180;
+  const lngDifference = (lng2-lng1) * Math.PI / 180;
+
+  const value =
+    Math.sin(latDifference/2) ** 2 +
+    Math.cos(lat1*Math.PI/180) *
+    Math.cos(lat2*Math.PI/180) *
+    Math.sin(lngDifference/2) ** 2;
+
+  return radius * 2 * Math.atan2(
+    Math.sqrt(value),
+    Math.sqrt(1-value)
+  );
+}
+
+document.getElementById("status").innerText = "施設データを読み込み中...";
+Papa.parse("data.csv",{
+  download:true,
+  header:true,
+  skipEmptyLines:true,
+
+  complete:function(result){
+    result.data.forEach(row => {
+      const lat = parseFloat(row.lat);
+      const lng = parseFloat(row.lng);
+      const category = row.category || "";
+
+      if(isNaN(lat) || isNaN(lng)){
+        return;
+      }
+
+      // Keep records lightweight; create Leaflet layers only for displayed results.
+      allMarkers.push({lat,lng,category,data:row,mapMarker:null});
+    });
+    facilityDataReady = true;
+    if(!isSearching) document.getElementById("status").innerText = "";
+  },
+  error:function(){
+    document.getElementById("status").innerText = "施設データを読み込めませんでした";
+  }
+});
+
+async function search(){
+  if(isSearching){
+    return;
+  }
+
+  const searchId = ++latestSearchId;
+  const address = document.getElementById("address").value.trim();
+  const limit = parseFloat(document.getElementById("distance").value);
+  const mode = document.getElementById("mode").value;
+  const showCircle = document.getElementById("circleToggle").checked;
+  const walkLimit = Number(document.getElementById("stationWalk").value);
+  const checkedCategories = [
+    ...document.querySelectorAll(".grid input:checked")
+  ].map(element => element.value);
+
+  if(!facilityDataReady){
+    document.getElementById("status").innerText = "施設データを読み込み中です。少し待って検索してください";
+    return;
+  }
+
+  if(!address){
+    alert("住所または駅を入力してください");
+    return;
+  }
+
+  setLoading(true,"検索地点を取得中...");
+  resultsAreComplete = false;
+  document.getElementById("count").innerText = "件数:確認中";
+  lastSearchDiagnostics = {
+    startedAt:Date.now(),address,mode,limit,walkLimit,
+    rangeCount:0,candidateCount:0,matchedCount:null,unassessedCount:0,complete:false,requests:[]
+  };
+
+  try{
+    await cacheReady;
+    let data = readCache(geocodeCache,address);
+    if(data === undefined){
+      data = await fetchJSON(
+        "https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" +
+        encodeURIComponent(address)
+      );
+      if(Array.isArray(data) && data.length) writeCache(geocodeCache,address,data);
+    }
+
+    if(searchId !== latestSearchId){
+      return;
+    }
+
+    if(!Array.isArray(data) || !data.length){
+      throw new Error("検索地点が見つかりませんでした");
+    }
+
+    const origin = {lat:parseFloat(data[0].lat),lng:parseFloat(data[0].lon)};
+    document.getElementById("count").innerText = "件数:確認中";
+
+    const candidates = [];
+
+    allMarkers.forEach(marker => {
+      let isWithinRange = false;
+
+      const distance = getDistance(
+        origin.lat,
+        origin.lng,
+        marker.lat,
+        marker.lng
+      );
+
+      if(mode === "distance"){
+        isWithinRange = distance <= limit;
+      }
+
+      if(mode === "drive"){
+        isWithinRange = distance * 2 <= limit;
+      }
+
+      if(mode === "train"){
+        isWithinRange = distance * 3 <= limit;
+      }
+
+      if(!isWithinRange) return;
+      lastSearchDiagnostics.rangeCount++;
+      const categoryMatches = checkedCategories.some(category =>
+        isCategoryMatch(marker.category,category)
+      );
+
+      if(categoryMatches){
+        candidates.push(marker);
+      }
+    });
+
+    let results = candidates;
+    let unavailableCount = 0;
+    let issues = [];
+    lastSearchDiagnostics.candidateCount = candidates.length;
+
+    if(walkLimit){
+      document.getElementById("status").innerText =
+        `候補施設 ${candidates.length}件の徒歩時間を確認中...`;
+      const filtered = await filterByWalkingTime(candidates,walkLimit,searchId,origin);
+      if(filtered === null){
+        return;
+      }
+      results = filtered.results;
+      unavailableCount = filtered.unavailableCount;
+      issues = filtered.issues;
+    }
+
+    if(searchId !== latestSearchId){
+      return;
+    }
+
+    lastSearchDiagnostics.unassessedCount = unavailableCount;
+    lastSearchDiagnostics.issues = issues;
+    lastSearchDiagnostics.complete = unavailableCount === 0;
+    if(unavailableCount){
+      resultsAreComplete = false;
+      document.getElementById("count").innerText = "件数:未確定";
+      document.getElementById("status").innerText =
+        `検索未完了:対象${candidates.length}件のうち未判定${unavailableCount}件。` +
+        "全件判定が完了するまで結果・CSVは確定しません。検索を押すと未判定分を再取得します。" +
+        (currentResults.length ? " 地図は前回完了した検索結果です。" : "") +
+        (issues.length ? ` ${issues[0].stage}: ${issues[0].message}` : "");
+      return;
+    }
+
+    // Commit the map and export data together only after every candidate is assessed.
+    centerLat = origin.lat;
+    centerLng = origin.lng;
+    map.setView([centerLat,centerLng],13);
+    if(centerMarker) map.removeLayer(centerMarker);
+    centerMarker = L.marker([centerLat,centerLng],{icon:createIcon("red")})
+      .addTo(map).bindPopup("検索地点").openPopup();
+    if(currentCircle){
+      map.removeLayer(currentCircle);
+      currentCircle = null;
+    }
+    if(showCircle && mode === "distance"){
+      currentCircle = L.circle([centerLat,centerLng],{
+        radius:limit * 1000,color:"blue",fillOpacity:0.1
+      }).addTo(map);
+    }
+    markers.clearLayers();
+    currentResults = [];
+
+    results.forEach(facility => {
+      const marker = getFacilityMarker(facility);
+      marker.stationWalk = walkLimit ? facility.stationWalk : null;
+      updateMarkerPopup(
+        marker,
+        marker.stationWalk
+      );
+      currentResults.push(marker);
+    });
+    markers.addLayers(currentResults);
+    resultsAreComplete = true;
+
+    lastSearchDiagnostics.matchedCount = currentResults.length;
+    lastSearchDiagnostics.unassessedCount = unavailableCount;
+    lastSearchDiagnostics.issues = issues;
+    document.getElementById("count").innerText = "件数:" + currentResults.length;
+    document.getElementById("status").innerText = "";
+  }catch(error){
+    if(searchId === latestSearchId){
+      alert(error.message);
+      resultsAreComplete = false;
+      lastSearchDiagnostics.complete = false;
+      lastSearchDiagnostics.error = {stage:error.stage || "検索",message:error.message};
+      document.getElementById("count").innerText = "件数:検索失敗";
+      document.getElementById("status").innerText =
+        walkLimit
+          ? "検索未完了:駅徒歩を取得できませんでした。再検索で未判定分を再取得します。"
+          : "検索未完了:検索地点を取得できませんでした";
+      if(currentResults.length){
+        document.getElementById("status").innerText += " 地図は前回完了した検索結果です。";
+      }
+    }
+  }finally{
+    if(searchId === latestSearchId){
+      await flushPersistentCache();
+      lastSearchDiagnostics.elapsedMs = Date.now() - lastSearchDiagnostics.startedAt;
+      isSearching = false;
+      document
+        .querySelectorAll(".buttons button")
+        .forEach((button,index) => {
+          button.disabled = index > 0 && !resultsAreComplete;
+        });
+    }
+  }
+}
+
+function escapeCSV(value){
+  const text = String(value ?? "").replace(/"/g,'""');
+  return `"${text}"`;
+}
+
+function downloadCSV(csv,filename){
+  const blob = new Blob(["\uFEFF" + csv],{
+    type:"text/csv;charset=utf-8;"
+  });
+
+  const link = document.createElement("a");
+  const url = URL.createObjectURL(blob);
+
+  link.href = url;
+  link.download = filename;
+  link.click();
+
+  URL.revokeObjectURL(url);
+}
+
+function exportFaxCSV(){
+  if(isSearching || !resultsAreComplete) return;
+  let csv = "name,category,company,fax,distance_km\n";
+
+  currentResults.forEach(marker => {
+    const row = marker.data;
+
+    const distance = getDistance(
+      centerLat,
+      centerLng,
+      marker.lat,
+      marker.lng
+    ).toFixed(2);
+
+    if(row.fax){
+      csv += [
+        escapeCSV(row.name),
+        escapeCSV(marker.category),
+        escapeCSV(row.company),
+        escapeCSV(row.fax),
+        escapeCSV(distance)
+      ].join(",") + "\n";
+    }
+  });
+
+  downloadCSV(csv,"fax.csv");
+}
+
+function exportDetailCSV(){
+  if(isSearching || !resultsAreComplete) return;
+  let csv = "name,category,company,phone,fax,distance_km\n";
+
+  currentResults.forEach(marker => {
+    const row = marker.data;
+
+    const distance = getDistance(
+      centerLat,
+      centerLng,
+      marker.lat,
+      marker.lng
+    ).toFixed(2);
+
+    csv += [
+      escapeCSV(row.name),
+      escapeCSV(marker.category),
+      escapeCSV(row.company),
+      escapeCSV(row.phone),
+      escapeCSV(row.fax),
+      escapeCSV(distance)
+    ].join(",") + "\n";
+  });
+
+  downloadCSV(csv,"detail.csv");
+}
+</script>
+
+</body>
+</html>
